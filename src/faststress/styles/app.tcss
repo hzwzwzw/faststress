@@ -1,0 +1,118 @@
+Screen {
+    layout: grid;
+    grid-size: 2 1;
+    grid-columns: 1fr 2fr;
+}
+
+#case-list-panel {
+    height: 100%;
+    border: solid $accent;
+    border-title-color: $text;
+}
+
+#editor-panel {
+    height: 100%;
+    border: solid $primary;
+    border-title-color: $text;
+}
+
+#run-panel {
+    height: 100%;
+    border: solid $success;
+}
+
+.case-item {
+    height: 3;
+    padding: 0 1;
+}
+
+.case-item:hover {
+    background: $boost;
+}
+
+.case-item.-selected {
+    background: $accent 30%;
+}
+
+.status-badge {
+    width: auto;
+}
+
+.status-pending {
+    color: $text-muted;
+}
+
+.status-running {
+    color: $warning;
+}
+
+.status-completed {
+    color: $success;
+}
+
+.status-failed {
+    color: $error;
+}
+
+#form-container {
+    height: auto;
+    max-height: 100%;
+    overflow-y: auto;
+    padding: 1;
+}
+
+.form-group {
+    height: auto;
+    margin-bottom: 1;
+    border: solid $surface;
+    padding: 1;
+}
+
+.form-group-title {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+Footer {
+    dock: bottom;
+}
+
+Header {
+    dock: top;
+}
+
+#output-log {
+    height: 1fr;
+    border: solid $surface;
+    overflow-y: auto;
+    padding: 0 1;
+}
+
+#result-summary {
+    height: auto;
+    max-height: 10;
+    border: solid $success;
+    padding: 1;
+}
+
+/* Optimizer screen */
+#optimizer-form {
+    height: auto;
+    padding: 1;
+    border: solid $accent;
+}
+
+#optimizer-progress {
+    height: 1fr;
+    overflow-y: auto;
+    padding: 1;
+    border: solid $surface;
+}
+
+#optimizer-result {
+    height: auto;
+    max-height: 8;
+    padding: 1;
+    border: solid $success;
+}
