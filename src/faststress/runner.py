@@ -5,15 +5,23 @@ import json
 import os
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
 from .models import BenchResult, TestCase
 
+LOGS_DIR = Path.home() / ".faststress" / "logs"
+
 
 class BenchRunner:
     def __init__(self, python_bin: Optional[str] = None):
         self.python_bin = python_bin or sys.executable
+        self._proc: Optional[asyncio.subprocess.Process] = None
+
+    @property
+    def is_running(self) -> bool:
+        return self._proc is not None and self._proc.returncode is None
 
     def _build_command(self, case: TestCase, output_file: str) -> list[str]:
         args = case.to_bench_args()
@@ -24,12 +32,12 @@ class BenchRunner:
         return [self.python_bin, "-m", "sglang.bench_serving"] + args
 
     @staticmethod
-    def _make_env(case: TestCase) -> dict[str, str] | None:
-        extra = case.get_env()
-        if not extra:
-            return None
+    def _make_env(case: TestCase) -> dict[str, str]:
         env = dict(os.environ)
-        env.update(extra)
+        env["PYTHONUNBUFFERED"] = "1"
+        extra = case.get_env()
+        if extra:
+            env.update(extra)
         return env
 
     async def run(
@@ -42,6 +50,7 @@ class BenchRunner:
 
         cmd = self._build_command(case, output_file)
         env = self._make_env(case)
+        log_path = self._log_path(case.name)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -49,13 +58,21 @@ class BenchRunner:
                 stderr=asyncio.subprocess.STDOUT,
                 env=env,
             )
+            self._proc = proc
+
             output_lines = []
-            async for line in self._read_stream(proc.stdout):
-                output_lines.append(line)
-                if on_output:
-                    on_output(line)
+            with open(log_path, "w") as log_file:
+                log_file.write(f"# {' '.join(cmd)}\n")
+                log_file.flush()
+                async for line in self._read_stream(proc.stdout):
+                    log_file.write(line + "\n")
+                    log_file.flush()
+                    output_lines.append(line)
+                    if on_output:
+                        on_output(line)
 
             await proc.wait()
+            self._proc = None
 
             if proc.returncode != 0:
                 return None, "\n".join(output_lines)
@@ -63,8 +80,10 @@ class BenchRunner:
             result = self._parse_result(output_file)
             return result, None
         except FileNotFoundError:
+            self._proc = None
             return None, "sglang not found. Install with: pip install sglang[all]"
         except Exception as e:
+            self._proc = None
             return None, str(e)
 
     async def run_stream(self, case: TestCase) -> AsyncIterator[str]:
@@ -74,15 +93,19 @@ class BenchRunner:
             output_file = f.name
 
         cmd = self._build_command(case, output_file)
+        env = self._make_env(case)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env=env,
         )
+        self._proc = proc
         async for line in self._read_stream(proc.stdout):
             yield line
 
         await proc.wait()
+        self._proc = None
         if proc.returncode == 0:
             yield f"\n__RESULT_FILE__:{output_file}"
         else:
@@ -90,11 +113,27 @@ class BenchRunner:
 
     @staticmethod
     async def _read_stream(stream: asyncio.StreamReader) -> AsyncIterator[str]:
+        buf = ""
         while True:
-            line = await stream.readline()
-            if not line:
+            chunk = await stream.read(4096)
+            if not chunk:
+                if buf.strip():
+                    yield buf.strip()
                 break
-            yield line.decode("utf-8", errors="replace").rstrip("\n")
+            buf += chunk.decode("utf-8", errors="replace")
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                line = line.rstrip("\r")
+                if "\r" in line:
+                    line = line.split("\r")[-1]
+                if line.strip():
+                    yield line
+            if "\r" in buf:
+                parts = buf.split("\r")
+                last = parts[-1]
+                if last.strip():
+                    yield last
+                buf = last
 
     @staticmethod
     def _parse_result(output_file: str) -> Optional[BenchResult]:
@@ -126,8 +165,20 @@ class BenchRunner:
         except (json.JSONDecodeError, KeyError):
             return None
 
-    def cancel(self, proc: asyncio.subprocess.Process):
+    def cancel(self):
+        import signal
+
+        proc = self._proc
+        if proc is None or proc.returncode is not None:
+            return
         try:
-            proc.terminate()
-        except ProcessLookupError:
+            os.kill(proc.pid, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
             pass
+        self._proc = None
+
+    @staticmethod
+    def _log_path(case_name: str) -> Path:
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return LOGS_DIR / f"{case_name}_{ts}.log"

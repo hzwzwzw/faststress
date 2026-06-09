@@ -6,9 +6,33 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+_VENDOR_PATTERNS = [
+    (["Qwen", "qwen", "QwQ", "qwq"], "Qwen"),
+    (["Llama", "llama"], "meta-llama"),
+    (["DeepSeek", "deepseek"], "deepseek-ai"),
+    (["Mistral", "mistral", "Mixtral", "mixtral"], "mistralai"),
+    (["Yi-", "yi-"], "01-ai"),
+    (["Gemma", "gemma"], "google"),
+    (["GLM", "glm", "chatglm", "ChatGLM"], "THUDM"),
+    (["InternLM", "internlm"], "internlm"),
+    (["Baichuan", "baichuan"], "baichuan-inc"),
+]
+
+
+def _infer_tokenizer(model: str) -> str:
+    if "/" in model and not model.startswith("/"):
+        return model
+    name = model.rsplit("/", 1)[-1]
+    for keywords, vendor in _VENDOR_PATTERNS:
+        if any(kw in name for kw in keywords):
+            return f"{vendor}/{name}"
+    return name
+
+
 class Backend(str, Enum):
     SGLANG = "sglang"
     SGLANG_OAI = "sglang-oai"
+    SGLANG_OAI_CHAT = "sglang-oai-chat"
 
 
 class DatasetType(str, Enum):
@@ -23,6 +47,8 @@ class ServerConfig(BaseModel):
     port: int = 30000
     base_url: Optional[str] = None
     api_key: Optional[str] = None
+    model: Optional[str] = None
+    tokenizer: Optional[str] = None
 
     def effective_url(self) -> str:
         if self.base_url:
@@ -45,6 +71,10 @@ class ServerConfig(BaseModel):
             kwargs["base_url"] = v
         if v := env.get("FASTSTRESS_SERVER_API_KEY"):
             kwargs["api_key"] = v
+        if v := env.get("FASTSTRESS_SERVER_MODEL"):
+            kwargs["model"] = v
+        if v := env.get("FASTSTRESS_SERVER_TOKENIZER"):
+            kwargs["tokenizer"] = v
         return cls(**kwargs)
 
 
@@ -96,9 +126,16 @@ class TestCase(BaseModel):
             "--num-prompts", str(self.load.num_prompts),
         ]
         if self.server.base_url:
-            args += ["--base-url", self.server.base_url]
+            args += ["--base-url", self.server.base_url.rstrip("/")]
         else:
             args += ["--host", self.server.host, "--port", str(self.server.port)]
+
+        if self.server.model:
+            args += ["--model", self.server.model]
+        if self.server.tokenizer:
+            args += ["--tokenizer", self.server.tokenizer]
+        elif self.server.model:
+            args += ["--tokenizer", _infer_tokenizer(self.server.model)]
 
         if self.load.request_rate != float("inf"):
             args += ["--request-rate", str(self.load.request_rate)]

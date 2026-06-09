@@ -157,6 +157,7 @@ class FastStressApp(App):
         Binding("d", "delete_case", "Delete"),
         Binding("r", "run_case", "Run"),
         Binding("R", "run_all", "Run All", key_display="shift+r"),
+        Binding("x", "stop_run", "Stop"),
         Binding("b", "batch_update", "Batch"),
         Binding("o", "optimizer", "Optimizer"),
         Binding("p", "load_preset", "Presets"),
@@ -233,6 +234,7 @@ class FastStressApp(App):
 
     def action_request_quit(self):
         if self._quit_pending:
+            self.runner.cancel()
             self.exit()
         else:
             self._quit_pending = True
@@ -241,6 +243,14 @@ class FastStressApp(App):
 
     def _reset_quit(self):
         self._quit_pending = False
+
+    def action_stop_run(self):
+        if self.runner.is_running:
+            self.runner.cancel()
+            run_panel = self.query_one(RunPanel)
+            run_panel.append_output("⏹ Stopped by user")
+            run_panel.show_error("Run cancelled")
+            self.notify("Run stopped")
 
     # --- Actions ---
 
