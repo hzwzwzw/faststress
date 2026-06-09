@@ -22,11 +22,30 @@ class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 30000
     base_url: Optional[str] = None
+    api_key: Optional[str] = None
 
     def effective_url(self) -> str:
         if self.base_url:
             return self.base_url
         return f"http://{self.host}:{self.port}"
+
+    @classmethod
+    def from_env(cls) -> "ServerConfig":
+        """Parse server config from FASTSTRESS_SERVER_* environment variables."""
+        import os
+        env = os.environ
+        kwargs: dict = {}
+        if v := env.get("FASTSTRESS_SERVER_BACKEND"):
+            kwargs["backend"] = Backend(v)
+        if v := env.get("FASTSTRESS_SERVER_HOST"):
+            kwargs["host"] = v
+        if v := env.get("FASTSTRESS_SERVER_PORT"):
+            kwargs["port"] = int(v)
+        if v := env.get("FASTSTRESS_SERVER_BASE_URL"):
+            kwargs["base_url"] = v
+        if v := env.get("FASTSTRESS_SERVER_API_KEY"):
+            kwargs["api_key"] = v
+        return cls(**kwargs)
 
 
 class RandomIdsParams(BaseModel):
@@ -124,6 +143,12 @@ class TestCase(BaseModel):
 
         args += ["--output-file", "/tmp/faststress_result.jsonl"]
         return args
+
+    def get_env(self) -> dict[str, str] | None:
+        """Extra environment variables for bench_serving subprocess."""
+        if self.server.api_key:
+            return {"OPENAI_API_KEY": self.server.api_key}
+        return None
 
 
 class RunStatus(str, Enum):

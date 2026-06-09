@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Input, Label, Static
+from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Static
 
-from .models import BenchResult, RunStatus, TestCase, TestGroup
+from .models import BenchResult, Preset, RunStatus, TestCase, TestGroup
 from .runner import BenchRunner
 from .storage import (
     export_cases,
@@ -27,6 +27,13 @@ from .widgets.optimizer_ui import OptimizerScreen
 from .widgets.run_panel import RunPanel
 
 
+def _fmt(val: float | None, suffix: str = "") -> str:
+    return f"{val:.1f}{suffix}" if val is not None else "N/A"
+
+
+# --- Modals ---
+
+
 class BatchUpdateModal(ModalScreen[None]):
     BINDINGS = [("escape", "dismiss", "Cancel")]
 
@@ -37,17 +44,18 @@ class BatchUpdateModal(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(classes="modal"):
             yield Label("[b]Batch Update[/b]", markup=True)
-            yield Label("Field (host / port / base_url / rate / concurrency / num_prompts)")
+            yield Label("Field: host / port / base_url / rate / concurrency / num_prompts")
             yield Input(id="batch-field", placeholder="e.g. base_url")
             yield Label("New Value")
             yield Input(id="batch-value", placeholder="e.g. http://10.0.0.1:8000")
-            yield Label("[dim]Press Enter to apply, Esc to cancel[/dim]", markup=True)
+            yield Label("[dim]Enter to apply, Esc to cancel[/dim]", markup=True)
 
     def on_input_submitted(self, event: Input.Submitted):
         if event.input.id == "batch-value":
             field = self.query_one("#batch-field", Input).value.strip()
             value = self.query_one("#batch-value", Input).value.strip()
-            self._apply(field, value)
+            if field:
+                self._apply(field, value)
             self.dismiss()
 
     def _apply(self, field: str, value: str):
@@ -55,15 +63,54 @@ class BatchUpdateModal(ModalScreen[None]):
             if field == "host":
                 case.server.host = value
             elif field == "port":
-                case.server.port = int(value)
+                case.server.port = int(value) if value.isdigit() else case.server.port
             elif field == "base_url":
                 case.server.base_url = value or None
             elif field == "rate":
-                case.load.request_rate = float("inf") if value == "inf" else float(value)
+                case.load.request_rate = float("inf") if value.lower() == "inf" else float(value)
             elif field == "concurrency":
-                case.load.max_concurrency = int(value) if value else None
+                case.load.max_concurrency = int(value) if value.isdigit() else None
             elif field == "num_prompts":
-                case.load.num_prompts = int(value)
+                case.load.num_prompts = int(value) if value.isdigit() else case.load.num_prompts
+
+
+class PresetSelectModal(ModalScreen[str | None]):
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, presets: list[str]):
+        super().__init__()
+        self._presets = presets
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal"):
+            yield Label("[b]Select Preset[/b]", markup=True)
+            items = [ListItem(Label(name)) for name in self._presets]
+            yield ListView(*items, id="preset-listview")
+            yield Label("[dim]Enter:select  Esc:cancel[/dim]", markup=True)
+
+    def on_list_view_selected(self, event: ListView.Selected):
+        idx = event.list_view.index if event.list_view.index is not None else 0
+        if idx < len(self._presets):
+            self.dismiss(self._presets[idx])
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
+class SavePresetModal(ModalScreen[str | None]):
+    BINDINGS = [("escape", "dismiss", "Cancel")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal"):
+            yield Label("[b]Save as Preset[/b]", markup=True)
+            yield Label("Preset Name")
+            yield Input(id="preset-name", placeholder="my-preset")
+            yield Label("[dim]Enter to save, Esc to cancel[/dim]", markup=True)
+
+    def on_input_submitted(self, event: Input.Submitted):
+        name = self.query_one("#preset-name", Input).value.strip()
+        if name:
+            self.dismiss(name)
 
 
 class ImportExportModal(ModalScreen[None]):
@@ -83,7 +130,9 @@ class ImportExportModal(ModalScreen[None]):
 
     def key_e(self):
         path = Path(self.query_one("#ie-path", Input).value.strip())
-        export_cases(self._cases, path)
+        if path.suffix == ".json":
+            export_cases(self._cases, path)
+            self.notify("Exported", severity="information")
         self.dismiss()
 
     def key_i(self):
@@ -91,23 +140,32 @@ class ImportExportModal(ModalScreen[None]):
         if path.exists():
             cases = import_cases(path)
             self._on_import(cases)
+            self.notify(f"Imported {len(cases)} cases", severity="information")
+        else:
+            self.notify("File not found", severity="error")
         self.dismiss()
+
+
+# --- Main App ---
 
 
 class FastStressApp(App):
     CSS_PATH = "styles/app.tcss"
     TITLE = "FastStress"
     BINDINGS = [
-        Binding("a", "add_case", "Add Case"),
-        Binding("d", "delete_case", "Delete Case"),
-        Binding("r", "run_case", "Run Selected"),
+        Binding("a", "add_case", "Add"),
+        Binding("d", "delete_case", "Delete"),
+        Binding("r", "run_case", "Run"),
         Binding("R", "run_all", "Run All", key_display="shift+r"),
-        Binding("s", "save", "Save"),
-        Binding("b", "batch_update", "Batch Update"),
+        Binding("b", "batch_update", "Batch"),
         Binding("o", "optimizer", "Optimizer"),
         Binding("p", "load_preset", "Presets"),
+        Binding("P", "save_preset", "Save Preset", key_display="shift+p"),
         Binding("i", "import_export", "Import/Export"),
-        Binding("q", "quit", "Quit"),
+        Binding("right", "focus_editor", "→ Editor", show=False),
+        Binding("left", "focus_list", "← List", show=False),
+        Binding("q", "request_quit", "Quit"),
+        Binding("ctrl+c", "request_quit", "Quit", show=False, priority=True),
     ]
 
     def __init__(self):
@@ -116,6 +174,7 @@ class FastStressApp(App):
         self.group = TestGroup(name="default", cases=self.cases)
         self.runner = BenchRunner()
         self._current_index = 0
+        self._quit_pending = False
         self._load_saved()
 
     def _load_saved(self):
@@ -125,125 +184,215 @@ class FastStressApp(App):
             try:
                 self.group = load_group(default_path)
                 self.cases = self.group.cases
+                if not self.cases:
+                    self.cases = [TestCase(name="default")]
+                    self.group.cases = self.cases
             except Exception:
                 pass
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal():
-            yield CaseListPanel(self.cases)
-            with Vertical():
-                yield CaseEditor(self.cases[0] if self.cases else TestCase())
-                yield RunPanel()
+        yield CaseListPanel(self.cases, id="case-list-panel")
+        with Vertical(id="right-panel"):
+            yield CaseEditor(self.cases[0] if self.cases else TestCase(), id="editor-panel")
+            yield RunPanel(id="run-panel")
         yield Footer()
+
+    # --- Message handlers ---
 
     def on_case_list_panel_case_selected(self, event: CaseListPanel.CaseSelected):
         self._current_index = event.index
-        editor = self.query_one(CaseEditor)
-        editor.case = event.case
+        self.query_one(CaseEditor).case = event.case
 
-    def action_add_case(self):
-        new_case = TestCase(name=f"case-{len(self.cases) + 1}")
-        self.cases.append(new_case)
-        self.group.cases = self.cases
-        self.query_one(CaseListPanel).cases = self.cases
-        self.query_one(CaseListPanel).refresh_list()
-
-    def action_delete_case(self):
-        if len(self.cases) <= 1:
-            return
-        del self.cases[self._current_index]
-        self._current_index = max(0, self._current_index - 1)
-        self.group.cases = self.cases
-        panel = self.query_one(CaseListPanel)
-        panel.cases = self.cases
-        panel.refresh_list()
-        if self.cases:
-            self.query_one(CaseEditor).case = self.cases[self._current_index]
-
-    def action_save(self):
-        editor = self.query_one(CaseEditor)
-        updated = editor.collect_case()
-        self.cases[self._current_index] = updated
+    def on_case_editor_case_updated(self, event: CaseEditor.CaseUpdated):
+        self.cases[self._current_index] = event.case
         self.group.cases = self.cases
         save_group(self.group)
         panel = self.query_one(CaseListPanel)
         panel.cases = self.cases
         panel.refresh_list()
-        self.notify("Saved", severity="information")
+
+    def on_case_editor_focus_released(self, event: CaseEditor.FocusReleased):
+        self._focus_case_list()
+
+    # --- Focus / Navigation ---
+
+    def action_focus_editor(self):
+        editor = self.query_one(CaseEditor)
+        editor.focus_first_input()
+
+    def action_focus_list(self):
+        self._focus_case_list()
+
+    def _focus_case_list(self):
+        try:
+            lv = self.query_one("#case-listview")
+            lv.focus()
+        except Exception:
+            pass
+
+    def action_request_quit(self):
+        if self._quit_pending:
+            self.exit()
+        else:
+            self._quit_pending = True
+            self.notify("Press again to quit", severity="warning", timeout=2)
+            self.set_timer(2.0, self._reset_quit)
+
+    def _reset_quit(self):
+        self._quit_pending = False
+
+    # --- Actions ---
+
+    def action_add_case(self):
+        new_case = TestCase(name=f"case-{len(self.cases) + 1}")
+        self.cases.append(new_case)
+        self.group.cases = self.cases
+        panel = self.query_one(CaseListPanel)
+        panel.cases = self.cases
+        panel.refresh_list()
+        self._current_index = len(self.cases) - 1
+        self.query_one(CaseEditor).case = new_case
+
+    def action_delete_case(self):
+        if len(self.cases) <= 1:
+            self.notify("Cannot delete last case", severity="warning")
+            return
+        del self.cases[self._current_index]
+        self._current_index = min(self._current_index, len(self.cases) - 1)
+        self.group.cases = self.cases
+        panel = self.query_one(CaseListPanel)
+        panel.cases = self.cases
+        panel.refresh_list()
+        self.query_one(CaseEditor).case = self.cases[self._current_index]
 
     def action_run_case(self):
         if not self.cases:
             return
         case = self.cases[self._current_index]
-        self.run_worker(self._execute_case(case))
+        self._do_run_case(case)
 
     def action_run_all(self):
-        self.run_worker(self._execute_all())
+        self._do_run_all()
 
-    async def _execute_case(self, case: TestCase):
+    @work(exclusive=True, exit_on_error=False)
+    async def _do_run_case(self, case: TestCase):
         panel = self.query_one(CaseListPanel)
         run_panel = self.query_one(RunPanel)
         run_panel.clear_output()
         panel.set_status(case.name, RunStatus.RUNNING)
-        run_panel.append_output(f"Running: {case.name}")
-        run_panel.append_output(f"Command: python -m sglang.bench_serving {' '.join(case.to_bench_args())}")
-        run_panel.append_output("─" * 60)
+        run_panel.append_output(f"▶ Running: {case.name}")
+        run_panel.append_output(f"  python -m sglang.bench_serving {' '.join(case.to_bench_args()[:8])}...")
+        run_panel.append_output("─" * 50)
 
-        result, error = await self.runner.run(
-            case, on_output=lambda line: self.call_from_thread(run_panel.append_output, line)
-        )
+        result, error = await self.runner.run(case, on_output=run_panel.append_output)
 
         if error:
             panel.set_status(case.name, RunStatus.FAILED)
-            run_panel.show_error(error)
+            run_panel.show_error(error[-200:] if len(error) > 200 else error)
         elif result:
             panel.set_status(case.name, RunStatus.COMPLETED)
             save_result_csv(case.name, result)
             summary = (
-                f"Throughput: {result.request_throughput:.1f} req/s | "
-                f"TTFT: {result.median_ttft_ms:.1f}ms (p99: {result.p99_ttft_ms:.1f}ms) | "
-                f"TPOT: {result.median_tpot_ms:.1f}ms (p99: {result.p99_tpot_ms:.1f}ms)"
+                f"Throughput: {_fmt(result.request_throughput)} req/s | "
+                f"TTFT: {_fmt(result.median_ttft_ms)}ms (p99: {_fmt(result.p99_ttft_ms)}ms) | "
+                f"TPOT: {_fmt(result.median_tpot_ms)}ms (p99: {_fmt(result.p99_tpot_ms)}ms)"
             )
             run_panel.show_result(summary)
+        else:
+            panel.set_status(case.name, RunStatus.FAILED)
+            run_panel.show_error("No result and no error — unexpected state")
 
-    async def _execute_all(self):
-        for i, case in enumerate(self.cases):
-            await self._execute_case(case)
+    @work(exclusive=True, exit_on_error=False)
+    async def _do_run_all(self):
+        for case in self.cases:
+            await self._execute_single(case)
+
+    async def _execute_single(self, case: TestCase):
+        panel = self.query_one(CaseListPanel)
+        run_panel = self.query_one(RunPanel)
+        run_panel.clear_output()
+        panel.set_status(case.name, RunStatus.RUNNING)
+        run_panel.append_output(f"▶ Running: {case.name}")
+
+        result, error = await self.runner.run(case, on_output=run_panel.append_output)
+
+        if error:
+            panel.set_status(case.name, RunStatus.FAILED)
+            run_panel.show_error(error[-200:] if len(error) > 200 else error)
+        elif result:
+            panel.set_status(case.name, RunStatus.COMPLETED)
+            save_result_csv(case.name, result)
+            run_panel.show_result(f"{case.name}: {_fmt(result.request_throughput)} req/s")
+
+    # --- Modals ---
 
     def action_batch_update(self):
-        self.push_screen(BatchUpdateModal(self.cases))
+        self.push_screen(BatchUpdateModal(self.cases), callback=self._on_batch_done)
 
-    def action_optimizer(self):
-        current = self.cases[self._current_index] if self.cases else TestCase()
-        self.push_screen(OptimizerScreen(current))
+    def _on_batch_done(self, _result) -> None:
+        self.group.cases = self.cases
+        save_group(self.group)
+        panel = self.query_one(CaseListPanel)
+        panel.cases = self.cases
+        panel.refresh_list()
+        self.query_one(CaseEditor).case = self.cases[self._current_index]
+        self.notify("Batch update applied", severity="information")
 
     def action_load_preset(self):
         presets = list_presets()
-        if presets:
-            preset = load_preset(presets[0])
-            if preset:
-                self.cases.clear()
-                self.cases.extend(preset.group.cases)
-                self.group = preset.group
-                panel = self.query_one(CaseListPanel)
-                panel.cases = self.cases
-                panel.refresh_list()
-                self.notify(f"Loaded preset: {preset.name}")
-        else:
-            self.notify("No presets found. Save current as preset with 'S'", severity="warning")
+        if not presets:
+            self.notify("No presets found. Use Shift+P to save current as preset.", severity="warning")
+            return
+        self.push_screen(PresetSelectModal(presets), callback=self._on_preset_selected)
+
+    def _on_preset_selected(self, name: str | None) -> None:
+        if not name:
+            return
+        preset = load_preset(name)
+        if preset and preset.group.cases:
+            self.cases.clear()
+            self.cases.extend(preset.group.cases)
+            self.group = preset.group
+            self._current_index = 0
+            panel = self.query_one(CaseListPanel)
+            panel.cases = self.cases
+            panel.statuses.clear()
+            panel.refresh_list()
+            self.query_one(CaseEditor).case = self.cases[0]
+            self.notify(f"Loaded preset: {name}", severity="information")
+
+    def action_save_preset(self):
+        self.push_screen(SavePresetModal(), callback=self._on_save_preset)
+
+    def _on_save_preset(self, name: str | None) -> None:
+        if not name:
+            return
+        editor = self.query_one(CaseEditor)
+        self.cases[self._current_index] = editor.collect_case()
+        self.group.cases = self.cases
+        preset = Preset(name=name, group=self.group.model_copy(deep=True))
+        save_preset(preset)
+        self.notify(f"Saved preset: {name}", severity="information")
 
     def action_import_export(self):
         def on_import(cases: list[TestCase]):
             self.cases.clear()
             self.cases.extend(cases)
             self.group.cases = self.cases
+            self._current_index = 0
             panel = self.query_one(CaseListPanel)
             panel.cases = self.cases
+            panel.statuses.clear()
             panel.refresh_list()
-            self.notify(f"Imported {len(cases)} cases")
+            if self.cases:
+                self.query_one(CaseEditor).case = self.cases[0]
 
         self.push_screen(ImportExportModal(self.cases, on_import))
+
+    def action_optimizer(self):
+        current = self.cases[self._current_index] if self.cases else TestCase()
+        self.push_screen(OptimizerScreen(current))
 
 
 def main():

@@ -23,6 +23,15 @@ class BenchRunner:
                 break
         return [self.python_bin, "-m", "sglang.bench_serving"] + args
 
+    @staticmethod
+    def _make_env(case: TestCase) -> dict[str, str] | None:
+        extra = case.get_env()
+        if not extra:
+            return None
+        env = dict(os.environ)
+        env.update(extra)
+        return env
+
     async def run(
         self, case: TestCase, on_output: Optional[callable] = None
     ) -> tuple[Optional[BenchResult], Optional[str]]:
@@ -32,11 +41,13 @@ class BenchRunner:
             output_file = f.name
 
         cmd = self._build_command(case, output_file)
+        env = self._make_env(case)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                env=env,
             )
             output_lines = []
             async for line in self._read_stream(proc.stdout):

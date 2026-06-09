@@ -10,6 +10,9 @@ dependencies = [
     "textual>=8.2.7",
 ]
 
+[project.optional-dependencies]
+sglang = ["sglang>=0.5.0", "transformers", "pybase64"]
+
 [project.scripts]
 faststress = "faststress.app:main"
 
@@ -19,3 +22,15 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/faststress"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::pytest.PytestCollectionWarning",
+]

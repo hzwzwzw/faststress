@@ -14,17 +14,22 @@ class CaseItem(ListItem):
     def __init__(self, case: TestCase, status: RunStatus = RunStatus.PENDING):
         super().__init__()
         self.case = case
-        self.status = status
+        self.run_status = status
 
     def compose(self) -> ComposeResult:
-        status_icon = {
+        icon = {
             RunStatus.PENDING: "○",
             RunStatus.RUNNING: "◉",
             RunStatus.COMPLETED: "●",
             RunStatus.FAILED: "✗",
-        }[self.status]
-        status_cls = f"status-{self.status.value}"
-        yield Label(f"[{status_cls}]{status_icon}[/] {self.case.name}", markup=True)
+        }[self.run_status]
+        color = {
+            RunStatus.PENDING: "white",
+            RunStatus.RUNNING: "yellow",
+            RunStatus.COMPLETED: "green",
+            RunStatus.FAILED: "red",
+        }[self.run_status]
+        yield Label(f"[{color}]{icon}[/{color}] {self.case.name}", markup=True)
 
 
 class CaseListPanel(Widget):
@@ -36,15 +41,14 @@ class CaseListPanel(Widget):
             self.index = index
             self.case = case
 
-    def __init__(self, cases: list[TestCase]):
-        super().__init__()
+    def __init__(self, cases: list[TestCase], **kwargs):
+        super().__init__(**kwargs)
         self.cases = cases
         self.statuses: dict[str, RunStatus] = {}
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="case-list-panel"):
-            yield Label("[b]Test Cases[/b]  [dim]a:add d:del r:run R:run-all[/dim]", markup=True)
-            yield ListView(*self._make_items(), id="case-listview")
+        yield Label("[b]Test Cases[/b]  [dim]a:add d:del r:run R:all[/dim]", markup=True)
+        yield ListView(*self._make_items(), id="case-listview")
 
     def _make_items(self) -> list[CaseItem]:
         items = []
@@ -60,7 +64,7 @@ class CaseListPanel(Widget):
             lv.append(item)
 
     def on_list_view_selected(self, event: ListView.Selected):
-        idx = event.list_view.index or 0
+        idx = event.list_view.index if event.list_view.index is not None else 0
         if idx < len(self.cases):
             self.selected_index = idx
             self.post_message(self.CaseSelected(idx, self.cases[idx]))
