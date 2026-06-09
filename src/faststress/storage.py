@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .models import BenchResult, Preset, TestCase, TestGroup
+from .models import BenchResult, Preset, ServerConfig, TestCase, TestGroup
 
 DATA_DIR = Path.home() / ".faststress"
 
@@ -15,6 +15,24 @@ def ensure_data_dir():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "presets").mkdir(exist_ok=True)
     (DATA_DIR / "results").mkdir(exist_ok=True)
+
+
+def save_server_config(config: ServerConfig, path: Optional[Path] = None):
+    ensure_data_dir()
+    if path is None:
+        path = DATA_DIR / "server.json"
+    path.write_text(config.model_dump_json(indent=2))
+
+
+def load_server_config(path: Optional[Path] = None) -> ServerConfig:
+    if path is None:
+        path = DATA_DIR / "server.json"
+    if not path.exists():
+        return ServerConfig()
+    try:
+        return ServerConfig.model_validate(json.loads(path.read_text()))
+    except Exception:
+        return ServerConfig()
 
 
 def save_group(group: TestGroup, path: Optional[Path] = None):

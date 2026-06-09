@@ -1,21 +1,32 @@
 import pytest
 
 from faststress.app import FastStressApp
-from faststress.models import DatasetType, TestCase
+from faststress.models import DatasetType, ServerConfig, TestCase
 from faststress.widgets.case_editor import CaseEditor
 from faststress.widgets.case_list import CaseListPanel
 from faststress.widgets.run_panel import RunPanel
+from faststress.widgets.server_panel import ServerPanel
 
 
 @pytest.mark.asyncio
 async def test_app_starts_with_layout():
-    """Verify both panels are rendered in the grid."""
+    """Verify all four panels are rendered in the 2x2 grid."""
     app = FastStressApp()
     async with app.run_test() as pilot:
         assert app.query_one("#case-list-panel") is not None
-        assert app.query_one("#right-panel") is not None
+        assert app.query_one("#server-panel") is not None
         assert app.query_one("#editor-panel") is not None
         assert app.query_one("#run-panel") is not None
+
+
+@pytest.mark.asyncio
+async def test_app_has_server_panel():
+    """App has a server config panel."""
+    app = FastStressApp()
+    async with app.run_test() as pilot:
+        server_panel = app.query_one(ServerPanel)
+        assert server_panel is not None
+        assert isinstance(server_panel.server, ServerConfig)
 
 
 @pytest.mark.asyncio
@@ -97,8 +108,6 @@ async def test_editor_collect_case():
         editor = app.query_one(CaseEditor)
         case = editor.collect_case()
         assert case.name == "default"
-        assert case.server.host == "127.0.0.1"
-        assert case.server.port == 30000
         assert case.load.num_prompts == 100
 
 
@@ -107,12 +116,10 @@ async def test_save_on_escape():
     """Esc in input saves current editor state and returns focus to list."""
     app = FastStressApp()
     async with app.run_test() as pilot:
-        # Focus the name input
         name_input = app.query_one("#input-name")
         name_input.focus()
         await pilot.pause()
         name_input.value = "renamed-case"
-        # Esc triggers save + focus release
         await pilot.press("escape")
         await pilot.pause()
         assert app.cases[0].name == "renamed-case"
@@ -140,7 +147,6 @@ async def test_run_panel_output():
         run_panel.append_output("test line 2")
         run_panel.show_result("done!")
         await pilot.pause()
-        # No crash means success
 
 
 @pytest.mark.asyncio
@@ -175,7 +181,15 @@ async def test_enter_moves_to_next_field():
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        # Next field after input-name is btn-load-env (Button)
-        from textual.widgets import Button
-        btn = app.query_one("#btn-load-env", Button)
-        assert btn.has_focus or app.focused is btn
+        from textual.widgets import RadioButton
+        focused = app.focused
+        assert isinstance(focused, RadioButton)
+
+
+@pytest.mark.asyncio
+async def test_server_config_shared():
+    """All cases share the same server config from the app."""
+    app = FastStressApp()
+    async with app.run_test() as pilot:
+        assert app.server_config is not None
+        assert app.server_config.host == "127.0.0.1"

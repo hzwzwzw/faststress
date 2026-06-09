@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.events import Key
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
@@ -41,6 +42,10 @@ class CaseListPanel(Widget):
             self.index = index
             self.case = case
 
+    class FocusDown(Message):
+        """User navigated past the last item."""
+        pass
+
     def __init__(self, cases: list[TestCase], **kwargs):
         super().__init__(**kwargs)
         self.cases = cases
@@ -68,6 +73,14 @@ class CaseListPanel(Widget):
         if idx < len(self.cases):
             self.selected_index = idx
             self.post_message(self.CaseSelected(idx, self.cases[idx]))
+
+    def on_key(self, event: Key) -> None:
+        if event.key == "down":
+            lv = self.query_one("#case-listview", ListView)
+            if lv.index is not None and lv.index >= len(self.cases) - 1:
+                self.post_message(self.FocusDown())
+                event.prevent_default()
+                event.stop()
 
     def set_status(self, name: str, status: RunStatus):
         self.statuses[name] = status

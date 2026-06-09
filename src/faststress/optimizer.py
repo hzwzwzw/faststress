@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from .models import BenchResult, LoadConfig, TestCase
+from .models import BenchResult, LoadConfig, ServerConfig, TestCase
 from .runner import BenchRunner
 
 
@@ -42,10 +42,11 @@ class OptimizationResult:
 
 
 class Optimizer:
-    def __init__(self, base_case: TestCase, slo: SLOTarget, search: SearchConfig):
+    def __init__(self, base_case: TestCase, slo: SLOTarget, search: SearchConfig, server: ServerConfig):
         self.base_case = base_case
         self.slo = slo
         self.search = search
+        self.server = server
         self.runner = BenchRunner()
         self._cancelled = False
 
@@ -93,7 +94,7 @@ class Optimizer:
                     break
 
                 case = self._make_case(rate, conc)
-                bench_result, error = await self.runner.run(case)
+                bench_result, error = await self.runner.run(case, self.server)
 
                 if bench_result is None:
                     continue
@@ -150,7 +151,7 @@ class Optimizer:
                 return best_rate
             mid = (lo + hi) / 2
             case = self._make_case(mid, None)
-            bench_result, _ = await self.runner.run(case)
+            bench_result, _ = await self.runner.run(case, self.server)
 
             if bench_result is None:
                 hi = mid
@@ -185,7 +186,7 @@ class Optimizer:
                 return best_conc
             mid = (lo + hi) // 2
             case = self._make_case(rate, mid)
-            bench_result, _ = await self.runner.run(case)
+            bench_result, _ = await self.runner.run(case, self.server)
 
             if bench_result is None:
                 hi = mid

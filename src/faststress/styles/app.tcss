@@ -1,7 +1,8 @@
 Screen {
     layout: grid;
-    grid-size: 2 1;
+    grid-size: 2 2;
     grid-columns: 1fr 2fr;
+    grid-rows: 1fr 1fr;
 }
 
 #case-list-panel {
@@ -11,20 +12,27 @@ Screen {
     overflow-y: auto;
 }
 
-#right-panel {
+#server-panel {
     height: 100%;
-    layout: vertical;
+    border: solid $accent;
+    padding: 0 1;
+    overflow-y: auto;
+}
+
+#server-form {
+    height: auto;
+    padding: 0;
 }
 
 #editor-panel {
-    height: 2fr;
+    height: 100%;
     border: solid $primary;
     overflow-y: auto;
     padding: 0 1;
 }
 
 #run-panel {
-    height: 1fr;
+    height: 100%;
     border: solid $success;
     padding: 0 1;
 }

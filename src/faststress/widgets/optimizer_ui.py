@@ -6,7 +6,7 @@ from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, Label, RichLog, Select, Static
 
-from ..models import TestCase
+from ..models import ServerConfig, TestCase
 from ..optimizer import Optimizer, SLOTarget, SearchConfig, SearchResult
 
 
@@ -21,9 +21,10 @@ class OptimizerScreen(Screen):
         ("c", "cancel_search", "Cancel"),
     ]
 
-    def __init__(self, base_case: TestCase | None = None):
+    def __init__(self, base_case: TestCase | None = None, server: ServerConfig | None = None):
         super().__init__()
         self.base_case = base_case or TestCase()
+        self.server = server or ServerConfig()
         self._optimizer: Optimizer | None = None
 
     def compose(self) -> ComposeResult:
@@ -99,7 +100,7 @@ class OptimizerScreen(Screen):
 
         mode = str(self.query_one("#opt-mode", Select).value)
 
-        self._optimizer = Optimizer(self.base_case, slo, search)
+        self._optimizer = Optimizer(self.base_case, slo, search, server=self.server)
         log = self.query_one("#optimizer-progress", RichLog)
         log.clear()
         log.write(f"Starting {mode} search...")

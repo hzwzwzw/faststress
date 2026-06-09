@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
-from .models import BenchResult, TestCase
+from .models import BenchResult, ServerConfig, TestCase
 
 LOGS_DIR = Path.home() / ".faststress" / "logs"
 
@@ -23,8 +23,8 @@ class BenchRunner:
     def is_running(self) -> bool:
         return self._proc is not None and self._proc.returncode is None
 
-    def _build_command(self, case: TestCase, output_file: str) -> list[str]:
-        args = case.to_bench_args()
+    def _build_command(self, case: TestCase, server: ServerConfig, output_file: str) -> list[str]:
+        args = case.to_bench_args(server)
         for i, a in enumerate(args):
             if a == "--output-file":
                 args[i + 1] = output_file
@@ -32,24 +32,24 @@ class BenchRunner:
         return [self.python_bin, "-m", "sglang.bench_serving"] + args
 
     @staticmethod
-    def _make_env(case: TestCase) -> dict[str, str]:
+    def _make_env(server: ServerConfig) -> dict[str, str]:
         env = dict(os.environ)
         env["PYTHONUNBUFFERED"] = "1"
-        extra = case.get_env()
+        extra = TestCase.get_env(server)
         if extra:
             env.update(extra)
         return env
 
     async def run(
-        self, case: TestCase, on_output: Optional[callable] = None
+        self, case: TestCase, server: ServerConfig, on_output: Optional[callable] = None
     ) -> tuple[Optional[BenchResult], Optional[str]]:
         with tempfile.NamedTemporaryFile(
             suffix=".jsonl", prefix="faststress_", delete=False
         ) as f:
             output_file = f.name
 
-        cmd = self._build_command(case, output_file)
-        env = self._make_env(case)
+        cmd = self._build_command(case, server, output_file)
+        env = self._make_env(server)
         log_path = self._log_path(case.name)
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -86,14 +86,14 @@ class BenchRunner:
             self._proc = None
             return None, str(e)
 
-    async def run_stream(self, case: TestCase) -> AsyncIterator[str]:
+    async def run_stream(self, case: TestCase, server: ServerConfig) -> AsyncIterator[str]:
         with tempfile.NamedTemporaryFile(
             suffix=".jsonl", prefix="faststress_", delete=False
         ) as f:
             output_file = f.name
 
-        cmd = self._build_command(case, output_file)
-        env = self._make_env(case)
+        cmd = self._build_command(case, server, output_file)
+        env = self._make_env(server)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,

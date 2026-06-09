@@ -9,7 +9,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Static
 
-from .models import BenchResult, Preset, RunStatus, TestCase, TestGroup
+from .models import Preset, RunStatus, ServerConfig, TestCase, TestGroup
 from .runner import BenchRunner
 from .storage import (
     export_cases,
@@ -17,14 +17,17 @@ from .storage import (
     list_presets,
     load_group,
     load_preset,
+    load_server_config,
     save_group,
     save_preset,
     save_result_csv,
+    save_server_config,
 )
 from .widgets.case_editor import CaseEditor
 from .widgets.case_list import CaseListPanel
 from .widgets.optimizer_ui import OptimizerScreen
 from .widgets.run_panel import RunPanel
+from .widgets.server_panel import ServerPanel
 
 
 def _fmt(val: float | None, suffix: str = "") -> str:
@@ -44,10 +47,10 @@ class BatchUpdateModal(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(classes="modal"):
             yield Label("[b]Batch Update[/b]", markup=True)
-            yield Label("Field: host / port / base_url / rate / concurrency / num_prompts")
-            yield Input(id="batch-field", placeholder="e.g. base_url")
+            yield Label("Field: rate / concurrency / num_prompts")
+            yield Input(id="batch-field", placeholder="e.g. rate")
             yield Label("New Value")
-            yield Input(id="batch-value", placeholder="e.g. http://10.0.0.1:8000")
+            yield Input(id="batch-value", placeholder="e.g. 10")
             yield Label("[dim]Enter to apply, Esc to cancel[/dim]", markup=True)
 
     def on_input_submitted(self, event: Input.Submitted):
@@ -60,13 +63,7 @@ class BatchUpdateModal(ModalScreen[None]):
 
     def _apply(self, field: str, value: str):
         for case in self._cases:
-            if field == "host":
-                case.server.host = value
-            elif field == "port":
-                case.server.port = int(value) if value.isdigit() else case.server.port
-            elif field == "base_url":
-                case.server.base_url = value or None
-            elif field == "rate":
+            if field == "rate":
                 case.load.request_rate = float("inf") if value.lower() == "inf" else float(value)
             elif field == "concurrency":
                 case.load.max_concurrency = int(value) if value.isdigit() else None
@@ -160,6 +157,7 @@ class FastStressApp(App):
         Binding("x", "stop_run", "Stop"),
         Binding("b", "batch_update", "Batch"),
         Binding("o", "optimizer", "Optimizer"),
+        Binding("s", "focus_server", "Server"),
         Binding("p", "load_preset", "Presets"),
         Binding("P", "save_preset", "Save Preset", key_display="shift+p"),
         Binding("i", "import_export", "Import/Export"),
@@ -173,6 +171,7 @@ class FastStressApp(App):
         super().__init__()
         self.cases: list[TestCase] = [TestCase(name="default")]
         self.group = TestGroup(name="default", cases=self.cases)
+        self.server_config = load_server_config()
         self.runner = BenchRunner()
         self._current_index = 0
         self._quit_pending = False
@@ -194,12 +193,16 @@ class FastStressApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield CaseListPanel(self.cases, id="case-list-panel")
-        with Vertical(id="right-panel"):
-            yield CaseEditor(self.cases[0] if self.cases else TestCase(), id="editor-panel")
-            yield RunPanel(id="run-panel")
+        yield CaseEditor(self.cases[0] if self.cases else TestCase(), id="editor-panel")
+        yield ServerPanel(self.server_config, id="server-panel")
+        yield RunPanel(id="run-panel")
         yield Footer()
 
     # --- Message handlers ---
+
+    def on_server_panel_server_updated(self, event: ServerPanel.ServerUpdated):
+        self.server_config = event.server
+        save_server_config(self.server_config)
 
     def on_case_list_panel_case_selected(self, event: CaseListPanel.CaseSelected):
         self._current_index = event.index
@@ -216,6 +219,16 @@ class FastStressApp(App):
     def on_case_editor_focus_released(self, event: CaseEditor.FocusReleased):
         self._focus_case_list()
 
+    def on_server_panel_focus_released(self, event: ServerPanel.FocusReleased):
+        self._focus_case_list()
+
+    def on_server_panel_focus_up(self, event: ServerPanel.FocusUp):
+        self._focus_case_list()
+
+    def on_case_list_panel_focus_down(self, event: CaseListPanel.FocusDown):
+        server_panel = self.query_one(ServerPanel)
+        server_panel.focus_first_input()
+
     # --- Focus / Navigation ---
 
     def action_focus_editor(self):
@@ -224,6 +237,10 @@ class FastStressApp(App):
 
     def action_focus_list(self):
         self._focus_case_list()
+
+    def action_focus_server(self):
+        server_panel = self.query_one(ServerPanel)
+        server_panel.focus_first_input()
 
     def _focus_case_list(self):
         try:
@@ -292,10 +309,10 @@ class FastStressApp(App):
         run_panel.clear_output()
         panel.set_status(case.name, RunStatus.RUNNING)
         run_panel.append_output(f"▶ Running: {case.name}")
-        run_panel.append_output(f"  python -m sglang.bench_serving {' '.join(case.to_bench_args()[:8])}...")
+        run_panel.append_output(f"  python -m sglang.bench_serving {' '.join(case.to_bench_args(self.server_config)[:8])}...")
         run_panel.append_output("─" * 50)
 
-        result, error = await self.runner.run(case, on_output=run_panel.append_output)
+        result, error = await self.runner.run(case, self.server_config, on_output=run_panel.append_output)
 
         if error:
             panel.set_status(case.name, RunStatus.FAILED)
@@ -325,7 +342,7 @@ class FastStressApp(App):
         panel.set_status(case.name, RunStatus.RUNNING)
         run_panel.append_output(f"▶ Running: {case.name}")
 
-        result, error = await self.runner.run(case, on_output=run_panel.append_output)
+        result, error = await self.runner.run(case, self.server_config, on_output=run_panel.append_output)
 
         if error:
             panel.set_status(case.name, RunStatus.FAILED)
@@ -364,12 +381,15 @@ class FastStressApp(App):
             self.cases.clear()
             self.cases.extend(preset.group.cases)
             self.group = preset.group
+            self.server_config = preset.server
+            save_server_config(self.server_config)
             self._current_index = 0
             panel = self.query_one(CaseListPanel)
             panel.cases = self.cases
             panel.statuses.clear()
             panel.refresh_list()
             self.query_one(CaseEditor).case = self.cases[0]
+            self.query_one(ServerPanel).server = self.server_config
             self.notify(f"Loaded preset: {name}", severity="information")
 
     def action_save_preset(self):
@@ -381,7 +401,7 @@ class FastStressApp(App):
         editor = self.query_one(CaseEditor)
         self.cases[self._current_index] = editor.collect_case()
         self.group.cases = self.cases
-        preset = Preset(name=name, group=self.group.model_copy(deep=True))
+        preset = Preset(name=name, group=self.group.model_copy(deep=True), server=self.server_config.model_copy(deep=True))
         save_preset(preset)
         self.notify(f"Saved preset: {name}", severity="information")
 
@@ -402,7 +422,7 @@ class FastStressApp(App):
 
     def action_optimizer(self):
         current = self.cases[self._current_index] if self.cases else TestCase()
-        self.push_screen(OptimizerScreen(current))
+        self.push_screen(OptimizerScreen(current, server=self.server_config))
 
 
 def main():

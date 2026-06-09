@@ -5,16 +5,14 @@ from textual.containers import Vertical
 from textual.events import Key
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Button, Input, Label, RadioButton, Static
+from textual.widgets import Input, Label, RadioButton
 
 from ..models import (
-    Backend,
     DatasetConfig,
     DatasetType,
     GspParams,
     LoadConfig,
     RandomIdsParams,
-    ServerConfig,
     SharegptParams,
     TestCase,
 )
@@ -22,16 +20,6 @@ from ..models import (
 # Flat ordered list of ALL focusable widget IDs
 FIELD_ORDER = [
     "input-name",
-    "btn-load-env",
-    "radio-backend-sglang",
-    "radio-backend-sglang-oai",
-    "radio-backend-sglang-oai-chat",
-    "input-host",
-    "input-port",
-    "input-base-url",
-    "input-api-key",
-    "input-model",
-    "input-tokenizer",
     "radio-dataset-random-ids",
     "radio-dataset-sharegpt",
     "radio-dataset-gsp",
@@ -90,26 +78,6 @@ class CaseEditor(Widget):
 
             yield Label("Name")
             yield Input(value=c.name, id="input-name", placeholder="Test case name")
-
-            # Server
-            yield Label("[b]Server[/b]", classes="form-section-title", markup=True)
-            yield Button("▶ Load from env (FASTSTRESS_SERVER_*)", id="btn-load-env", variant="default")
-            yield Label("Backend")
-            yield RadioButton("sglang", id="radio-backend-sglang", value=c.server.backend == Backend.SGLANG)
-            yield RadioButton("sglang-oai (/v1/completions)", id="radio-backend-sglang-oai", value=c.server.backend == Backend.SGLANG_OAI)
-            yield RadioButton("sglang-oai-chat (/v1/chat/completions)", id="radio-backend-sglang-oai-chat", value=c.server.backend == Backend.SGLANG_OAI_CHAT)
-            yield Label("Host")
-            yield Input(value=c.server.host, id="input-host", placeholder="127.0.0.1")
-            yield Label("Port")
-            yield Input(value=str(c.server.port), id="input-port", placeholder="30000")
-            yield Label("Base URL (overrides host:port)")
-            yield Input(value=c.server.base_url or "", id="input-base-url", placeholder="http://...")
-            yield Label("API Key")
-            yield Input(value=c.server.api_key or "", id="input-api-key", placeholder="sk-...", password=True)
-            yield Label("Model (server model name, empty=auto detect)")
-            yield Input(value=c.server.model or "", id="input-model", placeholder="/preset-models/QwQ-32B")
-            yield Label("Tokenizer (HF id or local path, empty=same as model)")
-            yield Input(value=c.server.tokenizer or "", id="input-tokenizer", placeholder="Qwen/QwQ-32B or /path/to/model")
 
             # Dataset
             yield Label("[b]Dataset[/b]", classes="form-section-title", markup=True)
@@ -170,31 +138,12 @@ class CaseEditor(Widget):
     def on_mount(self) -> None:
         self._update_dataset_visibility(self._case.dataset.dataset_type.value)
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn-load-env":
-            self._load_from_env()
-
-    def _load_from_env(self) -> None:
-        env_config = ServerConfig.from_env()
-        self._set_backend_radio(env_config.backend.value)
-        self.query_one("#input-host", Input).value = env_config.host
-        self.query_one("#input-port", Input).value = str(env_config.port)
-        self.query_one("#input-base-url", Input).value = env_config.base_url or ""
-        self.query_one("#input-api-key", Input).value = env_config.api_key or ""
-        self.query_one("#input-model", Input).value = env_config.model or ""
-        self.query_one("#input-tokenizer", Input).value = env_config.tokenizer or ""
-
     def on_radio_button_changed(self, event: RadioButton.Changed) -> None:
         if not event.value:
             return
         btn_id = event.radio_button.id or ""
-        # Backend group
-        if btn_id.startswith("radio-backend-"):
-            for rid in ("radio-backend-sglang", "radio-backend-sglang-oai", "radio-backend-sglang-oai-chat"):
-                if rid != btn_id:
-                    self.query_one(f"#{rid}", RadioButton).value = False
         # Dataset group
-        elif btn_id.startswith("radio-dataset-"):
+        if btn_id.startswith("radio-dataset-"):
             for rid in ("radio-dataset-random-ids", "radio-dataset-sharegpt", "radio-dataset-gsp"):
                 if rid != btn_id:
                     self.query_one(f"#{rid}", RadioButton).value = False
@@ -315,7 +264,7 @@ class CaseEditor(Widget):
                 self._save_and_release()
                 event.prevent_default()
                 event.stop()
-            elif isinstance(focused, (RadioButton, Button)):
+            elif isinstance(focused, RadioButton):
                 self._save_and_release()
                 event.prevent_default()
                 event.stop()
@@ -340,11 +289,6 @@ class CaseEditor(Widget):
             pass
         return "random-ids"
 
-    def _set_backend_radio(self, value: str) -> None:
-        self.query_one("#radio-backend-sglang", RadioButton).value = (value == "sglang")
-        self.query_one("#radio-backend-sglang-oai", RadioButton).value = (value == "sglang-oai")
-        self.query_one("#radio-backend-sglang-oai-chat", RadioButton).value = (value == "sglang-oai-chat")
-
     def _update_dataset_visibility(self, dataset_type: str) -> None:
         mapping = {
             "random-ids": "group-random-ids",
@@ -365,13 +309,6 @@ class CaseEditor(Widget):
         c = self._case
         try:
             self.query_one("#input-name", Input).value = c.name
-            self._set_backend_radio(c.server.backend.value)
-            self.query_one("#input-host", Input).value = c.server.host
-            self.query_one("#input-port", Input).value = str(c.server.port)
-            self.query_one("#input-base-url", Input).value = c.server.base_url or ""
-            self.query_one("#input-api-key", Input).value = c.server.api_key or ""
-            self.query_one("#input-model", Input).value = c.server.model or ""
-            self.query_one("#input-tokenizer", Input).value = c.server.tokenizer or ""
             self.query_one("#radio-dataset-random-ids", RadioButton).value = (c.dataset.dataset_type == DatasetType.RANDOM_IDS)
             self.query_one("#radio-dataset-sharegpt", RadioButton).value = (c.dataset.dataset_type == DatasetType.SHAREGPT)
             self.query_one("#radio-dataset-gsp", RadioButton).value = (c.dataset.dataset_type == DatasetType.GENERATED_SHARED_PREFIX)
@@ -401,20 +338,6 @@ class CaseEditor(Widget):
 
     def collect_case(self) -> TestCase:
         name = self.query_one("#input-name", Input).value.strip() or "unnamed"
-
-        backend = Backend.SGLANG
-        if self.query_one("#radio-backend-sglang-oai", RadioButton).value:
-            backend = Backend.SGLANG_OAI
-        elif self.query_one("#radio-backend-sglang-oai-chat", RadioButton).value:
-            backend = Backend.SGLANG_OAI_CHAT
-
-        host = self.query_one("#input-host", Input).value.strip() or "127.0.0.1"
-        port_str = self.query_one("#input-port", Input).value.strip()
-        port = int(port_str) if port_str.isdigit() else 30000
-        base_url = self.query_one("#input-base-url", Input).value.strip() or None
-        api_key = self.query_one("#input-api-key", Input).value.strip() or None
-        model = self.query_one("#input-model", Input).value.strip() or None
-        tokenizer = self.query_one("#input-tokenizer", Input).value.strip() or None
 
         dataset_type = DatasetType.RANDOM_IDS
         if self.query_one("#radio-dataset-sharegpt", RadioButton).value:
@@ -456,7 +379,6 @@ class CaseEditor(Widget):
 
         return TestCase(
             name=name,
-            server=ServerConfig(backend=backend, host=host, port=port, base_url=base_url, api_key=api_key, model=model, tokenizer=tokenizer),
             dataset=DatasetConfig(
                 dataset_type=dataset_type,
                 random_ids=random_ids,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 _VENDOR_PATTERNS = [
@@ -114,28 +114,29 @@ class LoadConfig(BaseModel):
 
 
 class TestCase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     name: str = "unnamed"
-    server: ServerConfig = Field(default_factory=ServerConfig)
     dataset: DatasetConfig = Field(default_factory=DatasetConfig)
     load: LoadConfig = Field(default_factory=LoadConfig)
     extra_request_body: Optional[str] = None
 
-    def to_bench_args(self) -> list[str]:
+    def to_bench_args(self, server: ServerConfig) -> list[str]:
         args = [
-            "--backend", self.server.backend.value,
+            "--backend", server.backend.value,
             "--num-prompts", str(self.load.num_prompts),
         ]
-        if self.server.base_url:
-            args += ["--base-url", self.server.base_url.rstrip("/")]
+        if server.base_url:
+            args += ["--base-url", server.base_url.rstrip("/")]
         else:
-            args += ["--host", self.server.host, "--port", str(self.server.port)]
+            args += ["--host", server.host, "--port", str(server.port)]
 
-        if self.server.model:
-            args += ["--model", self.server.model]
-        if self.server.tokenizer:
-            args += ["--tokenizer", self.server.tokenizer]
-        elif self.server.model:
-            args += ["--tokenizer", _infer_tokenizer(self.server.model)]
+        if server.model:
+            args += ["--model", server.model]
+        if server.tokenizer:
+            args += ["--tokenizer", server.tokenizer]
+        elif server.model:
+            args += ["--tokenizer", _infer_tokenizer(server.model)]
 
         if self.load.request_rate != float("inf"):
             args += ["--request-rate", str(self.load.request_rate)]
@@ -181,10 +182,10 @@ class TestCase(BaseModel):
         args += ["--output-file", "/tmp/faststress_result.jsonl"]
         return args
 
-    def get_env(self) -> dict[str, str] | None:
-        """Extra environment variables for bench_serving subprocess."""
-        if self.server.api_key:
-            return {"OPENAI_API_KEY": self.server.api_key}
+    @staticmethod
+    def get_env(server: ServerConfig) -> dict[str, str] | None:
+        if server.api_key:
+            return {"OPENAI_API_KEY": server.api_key}
         return None
 
 
@@ -229,3 +230,4 @@ class TestGroup(BaseModel):
 class Preset(BaseModel):
     name: str
     group: TestGroup
+    server: ServerConfig = Field(default_factory=ServerConfig)
